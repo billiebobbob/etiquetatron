@@ -229,6 +229,24 @@ class EtiquetaSeparador(ctk.CTk):
         fmt = LABEL_FORMATS[self.selected_format.get()]
         self.format_detail.configure(text=f"{fmt['tape_width_mm']}x{fmt['cut_length_mm']}mm")
 
+    def _open_printer_config(self):
+        """Abre la ventana de configuración/preferencias de la impresora seleccionada."""
+        printer = self.selected_printer.get()
+        if not printer or printer == "Sin impresora":
+            messagebox.showwarning("Sin impresora", "No hay impresora seleccionada.")
+            return
+        try:
+            if sys.platform == 'win32':
+                # Abre las preferencias de impresión de la impresora
+                subprocess.Popen(['rundll32', 'printui.dll,PrintUIEntry', '/e', '/n', printer])
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', '-b', 'com.apple.systempreferences',
+                                  '/System/Library/PreferencePanes/PrintAndFax.prefPane'])
+            else:
+                subprocess.Popen(['xdg-open', 'system-config-printer'])
+        except Exception as e:
+            self.append_log(f"Error abriendo config: {e}")
+
     def _refresh_printers(self):
         self.printers = get_printers()
         if self.printers:
@@ -316,6 +334,13 @@ class EtiquetaSeparador(ctk.CTk):
             fg_color="transparent", border_width=1, border_color=TEXT_MUTED,
             text_color=TEXT_SECONDARY, hover_color=BG_CARD_LIGHT
         ).pack(side="right")
+
+        ctk.CTkButton(
+            row2, text="Config", width=55, height=26, corner_radius=6,
+            font=ctk.CTkFont(size=9), command=self._open_printer_config,
+            fg_color="transparent", border_width=1, border_color=ACCENT_ORANGE,
+            text_color=ACCENT_ORANGE, hover_color=BG_CARD_LIGHT
+        ).pack(side="right", padx=(0, 4))
 
         # === LOAD BUTTON ===
         load_row = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -405,12 +430,12 @@ class EtiquetaSeparador(ctk.CTk):
         self.save_button.pack(side="left", padx=4)
 
         self.print_button = ctk.CTkButton(
-            btn_container, text="Guardar + Imprimir",
+            btn_container, text="Guardar + Imprimir 1",
             font=ctk.CTkFont(size=11, weight="bold"),
             height=34, width=170, corner_radius=8,
             fg_color=ACCENT_GREEN, hover_color="#00a844",
             text_color="#0a0a0a",
-            command=lambda: self.save_and_print(send_to_printer=True),
+            command=lambda: self.save_and_print(send_to_printer=True, only_first=True),
             state="disabled"
         )
         self.print_button.pack(side="left", padx=4)
@@ -421,7 +446,7 @@ class EtiquetaSeparador(ctk.CTk):
             height=34, width=140, corner_radius=8,
             fg_color=ACCENT_ORANGE, hover_color="#e65100",
             text_color="#0a0a0a",
-            command=lambda: self.save_and_print(send_to_printer=True),
+            command=lambda: self.save_and_print(send_to_printer=True, only_first=False),
             state="disabled"
         )
         self.print_all_button.pack(side="left", padx=4)
@@ -566,7 +591,7 @@ class EtiquetaSeparador(ctk.CTk):
         self.progress_bar.set(1.0)
 
     # --- Save/Print ---
-    def save_and_print(self, send_to_printer=False):
+    def save_and_print(self, send_to_printer=False, only_first=False):
         if self.processing or not self.preview_labels:
             return
         if send_to_printer:
@@ -577,13 +602,14 @@ class EtiquetaSeparador(ctk.CTk):
         self.processing = True
         self.save_button.configure(state="disabled")
         self.print_button.configure(state="disabled")
+        self.print_all_button.configure(state="disabled")
         self.select_button.configure(state="disabled")
         self.progress_bar.set(0)
-        thread = threading.Thread(target=self._save_print_thread, args=(send_to_printer,))
+        thread = threading.Thread(target=self._save_print_thread, args=(send_to_printer, only_first))
         thread.daemon = True
         thread.start()
 
-    def _save_print_thread(self, send_to_printer):
+    def _save_print_thread(self, send_to_printer, only_first=False):
         try:
             fmt_name = self.selected_format.get()
             fmt = LABEL_FORMATS[fmt_name]
@@ -625,12 +651,16 @@ class EtiquetaSeparador(ctk.CTk):
                 saved += 1
 
                 if send_to_printer and printer:
-                    try:
-                        result = print_image(filepath, printer, tape_mm)
-                        if result and result.returncode == 0:
-                            printed += 1
-                    except Exception:
+                    # only_first: solo imprime la primera etiqueta
+                    if only_first and printed >= 1:
                         pass
+                    else:
+                        try:
+                            result = print_image(filepath, printer, tape_mm)
+                            if result and result.returncode == 0:
+                                printed += 1
+                        except Exception:
+                            pass
 
             self.after(0, lambda: self.progress_bar.set(1.0))
             self.after(0, lambda: self._finish_processing(saved, printed, output_dir))
