@@ -24,15 +24,15 @@ CANVAS_WIDTH_MM = 62
 LABEL_FORMATS = {
     "Envio": {
         "description": "Envio (15.2cm x 3cm)",
-        "canvas_length_mm": 152,   # largo (direccion de corte)
-        "canvas_width_mm": CANVAS_WIDTH_MM,  # ancho fijo cinta 62mm
-        "tape_mm": CANVAS_WIDTH_MM,  # rollo continuo 62mm
+        "tape_width_mm": CANVAS_WIDTH_MM,  # 62mm ancho de cinta = ancho de imagen
+        "cut_length_mm": 152,               # largo de corte = alto de imagen
+        "tape_mm": CANVAS_WIDTH_MM,
     },
     "Producto": {
         "description": "Producto (6.2cm x 3.3cm)",
-        "canvas_length_mm": CANVAS_WIDTH_MM,
-        "canvas_width_mm": 33,
-        "tape_mm": CANVAS_WIDTH_MM,  # rollo continuo 62mm
+        "tape_width_mm": CANVAS_WIDTH_MM,  # 62mm ancho de cinta
+        "cut_length_mm": CANVAS_WIDTH_MM,  # 62mm corte (canvas cuadrado, etiqueta centrada)
+        "tape_mm": CANVAS_WIDTH_MM,
     },
 }
 
@@ -234,13 +234,14 @@ class EtiquetaSeparador(ctk.CTk):
 
     def _get_canvas_size(self):
         """Returns (width_px, height_px) for the image.
-        width = largo de la etiqueta (152mm envio), height = ancho cinta (62mm)"""
+        width = ancho de cinta (62mm siempre), height = largo de corte (152mm envio, 62mm producto)
+        Imagen PORTRAIT: ancho coincide con cinta, alto determina corte."""
         fmt = LABEL_FORMATS[self.selected_format.get()]
-        return mm_to_px(fmt["canvas_length_mm"]), mm_to_px(fmt["canvas_width_mm"])
+        return mm_to_px(fmt["tape_width_mm"]), mm_to_px(fmt["cut_length_mm"])
 
     def _on_format_change(self, *args):
         fmt = LABEL_FORMATS[self.selected_format.get()]
-        self.format_detail.configure(text=f"{fmt['canvas_length_mm']}x{fmt['canvas_width_mm']}mm")
+        self.format_detail.configure(text=f"{fmt['tape_width_mm']}x{fmt['cut_length_mm']}mm")
 
     def _refresh_printers(self):
         self.printers = get_printers()
@@ -697,6 +698,15 @@ class EtiquetaSeparador(ctk.CTk):
 
     def _fit_to_canvas(self, img, canvas_w, canvas_h):
         src_w, src_h = img.size
+
+        # Auto-rotar si la orientacion no coincide con el canvas
+        # Ej: etiqueta landscape (152x62) en canvas portrait (62x152) → rotar 90° CCW
+        src_landscape = src_w > src_h
+        canvas_landscape = canvas_w > canvas_h
+        if src_landscape != canvas_landscape:
+            img = img.rotate(90, expand=True)
+            src_w, src_h = img.size
+
         margin = mm_to_px(1)
         avail_w, avail_h = canvas_w - 2*margin, canvas_h - 2*margin
         scale = min(avail_w/src_w, avail_h/src_h)
