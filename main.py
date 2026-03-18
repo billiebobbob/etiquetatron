@@ -26,13 +26,13 @@ LABEL_FORMATS = {
         "description": "Envio (15.2cm x 3cm)",
         "canvas_length_mm": 152,   # largo (direccion de corte)
         "canvas_width_mm": CANVAS_WIDTH_MM,  # ancho fijo cinta 62mm
-        "print_media": f"Custom.{CANVAS_WIDTH_MM}x152mm",
+        "tape_mm": CANVAS_WIDTH_MM,  # rollo continuo 62mm
     },
     "Producto": {
         "description": "Producto (6.2cm x 3.3cm)",
         "canvas_length_mm": CANVAS_WIDTH_MM,
         "canvas_width_mm": 33,
-        "print_media": f"Custom.33x{CANVAS_WIDTH_MM}mm",
+        "tape_mm": CANVAS_WIDTH_MM,  # rollo continuo 62mm
     },
 }
 
@@ -90,18 +90,85 @@ def get_default_printer():
     return None
 
 
-def print_image(filepath, printer_name=None, print_media=None):
+def print_image(filepath, printer_name=None, tape_mm=62):
+    """Imprime una imagen en la impresora seleccionada.
+    tape_mm: ancho de cinta (62mm para Brother QL-800), usa rollo continuo.
+    """
     if sys.platform in ('darwin',) or sys.platform.startswith('linux'):
         cmd = ['lp']
         if printer_name:
             cmd.extend(['-d', printer_name])
-        if print_media:
-            cmd.extend(['-o', f'media={print_media}'])
+        # Usar rollo continuo (ej: "62mm") - la impresora corta segun largo de imagen
+        cmd.extend(['-o', f'media={tape_mm}mm'])
         cmd.extend(['-o', 'fit-to-page'])
         cmd.append(filepath)
         return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     elif sys.platform == 'win32':
-        os.startfile(filepath, 'print')
+        return _print_windows(filepath, printer_name, tape_mm)
+
+
+def _print_windows(filepath, printer_name, tape_mm=62):
+    """Imprime en Windows via PowerShell/.NET seleccionando rollo continuo.
+    Busca el papel '{tape_mm}mm' en los tamaños disponibles de la impresora.
+    Si no lo encuentra, usa tamaño custom basado en el DPI de la imagen.
+    La impresora corta automaticamente segun el largo de la imagen.
+    """
+    fp = filepath.replace('\\', '\\\\')
+    pn = (printer_name or "").replace("'", "''")
+
+    ps_script = f'''
+$ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.Drawing
+
+$bitmap = [System.Drawing.Image]::FromFile("{fp}")
+
+$pd = New-Object System.Drawing.Printing.PrintDocument
+$pd.PrinterSettings.PrinterName = "{pn}"
+
+# Buscar papel continuo "{tape_mm}mm" en la impresora
+$targetPaper = $null
+foreach ($ps in $pd.PrinterSettings.PaperSizes) {{
+    if ($ps.PaperName -eq "{tape_mm}mm") {{
+        $targetPaper = $ps
+        break
+    }}
+}}
+
+if ($targetPaper) {{
+    $pd.DefaultPageSettings.PaperSize = $targetPaper
+}} else {{
+    # Fallback: calcular tamaño custom desde la imagen
+    $wHundredths = [int]($bitmap.Width / $bitmap.HorizontalResolution * 100)
+    $hHundredths = [int]($bitmap.Height / $bitmap.VerticalResolution * 100)
+    $customSize = New-Object System.Drawing.Printing.PaperSize("Custom", $wHundredths, $hHundredths)
+    $pd.DefaultPageSettings.PaperSize = $customSize
+}}
+
+$pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
+
+$pd.add_PrintPage({{
+    param($sender, $e)
+    $destRect = New-Object System.Drawing.RectangleF(0, 0, $e.PageBounds.Width, $e.PageBounds.Height)
+    $e.Graphics.DrawImage($bitmap, $destRect)
+}})
+
+$pd.Print()
+$bitmap.Dispose()
+$pd.Dispose()
+Write-Output "OK"
+'''
+    try:
+        result = subprocess.run(
+            ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
+            capture_output=True, text=True, timeout=30
+        )
+        return result
+    except Exception as e:
+        # Fallback: abrir con visor de imagenes
+        try:
+            os.startfile(filepath, 'print')
+        except Exception:
+            pass
         return None
 
 
@@ -534,7 +601,7 @@ class EtiquetaSeparador(ctk.CTk):
             fmt_name = self.selected_format.get()
             fmt = LABEL_FORMATS[fmt_name]
             printer = self.selected_printer.get() if send_to_printer else None
-            print_media = fmt.get("print_media") if send_to_printer else None
+            tape_mm = fmt.get("tape_mm", CANVAS_WIDTH_MM)
 
             doc = fitz.open(self.pdf_path)
             first_text = doc[0].get_text()
@@ -572,7 +639,7 @@ class EtiquetaSeparador(ctk.CTk):
 
                 if send_to_printer and printer:
                     try:
-                        result = print_image(filepath, printer, print_media)
+                        result = print_image(filepath, printer, tape_mm)
                         if result and result.returncode == 0:
                             printed += 1
                     except Exception:
@@ -601,14 +668,14 @@ class EtiquetaSeparador(ctk.CTk):
         self.log_message(f"Imprimiendo {len(files)} etiquetas...")
 
         fmt = LABEL_FORMATS[self.selected_format.get()]
-        media = fmt.get("print_media")
+        tape_mm = fmt.get("tape_mm", CANVAS_WIDTH_MM)
 
         def _print_thread():
             printed = 0
             for i, fname in enumerate(files):
                 filepath = os.path.join(self.last_output_dir, fname)
                 try:
-                    result = print_image(filepath, printer, media)
+                    result = print_image(filepath, printer, tape_mm)
                     if result and result.returncode == 0:
                         printed += 1
                         self.after(0, lambda f=fname: self.append_log(f"  OK: {f}"))
