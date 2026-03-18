@@ -23,14 +23,16 @@ CANVAS_WIDTH_MM = 62
 
 LABEL_FORMATS = {
     "Envio": {
-        "description": "Envio (14cm x 3cm)",
-        "canvas_width_mm": 140,
-        "canvas_height_mm": CANVAS_WIDTH_MM,
+        "description": "Envio (15.2cm x 3cm)",
+        "canvas_length_mm": 152,   # largo (direccion de corte)
+        "canvas_width_mm": CANVAS_WIDTH_MM,  # ancho fijo cinta 62mm
+        "print_media": f"Custom.{CANVAS_WIDTH_MM}x152mm",
     },
     "Producto": {
         "description": "Producto (6.2cm x 3.3cm)",
-        "canvas_width_mm": CANVAS_WIDTH_MM,
-        "canvas_height_mm": 33,
+        "canvas_length_mm": CANVAS_WIDTH_MM,
+        "canvas_width_mm": 33,
+        "print_media": f"Custom.33x{CANVAS_WIDTH_MM}mm",
     },
 }
 
@@ -88,11 +90,14 @@ def get_default_printer():
     return None
 
 
-def print_image(filepath, printer_name=None):
+def print_image(filepath, printer_name=None, print_media=None):
     if sys.platform in ('darwin',) or sys.platform.startswith('linux'):
         cmd = ['lp']
         if printer_name:
             cmd.extend(['-d', printer_name])
+        if print_media:
+            cmd.extend(['-o', f'media={print_media}'])
+        cmd.extend(['-o', 'fit-to-page'])
         cmd.append(filepath)
         return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     elif sys.platform == 'win32':
@@ -161,12 +166,14 @@ class EtiquetaSeparador(ctk.CTk):
         return None
 
     def _get_canvas_size(self):
+        """Returns (width_px, height_px) for the image.
+        width = largo de la etiqueta (152mm envio), height = ancho cinta (62mm)"""
         fmt = LABEL_FORMATS[self.selected_format.get()]
-        return mm_to_px(fmt["canvas_width_mm"]), mm_to_px(fmt["canvas_height_mm"])
+        return mm_to_px(fmt["canvas_length_mm"]), mm_to_px(fmt["canvas_width_mm"])
 
     def _on_format_change(self, *args):
         fmt = LABEL_FORMATS[self.selected_format.get()]
-        self.format_detail.configure(text=f"{fmt['canvas_width_mm']}x{fmt['canvas_height_mm']}mm")
+        self.format_detail.configure(text=f"{fmt['canvas_length_mm']}x{fmt['canvas_width_mm']}mm")
 
     def _refresh_printers(self):
         self.printers = get_printers()
@@ -525,7 +532,9 @@ class EtiquetaSeparador(ctk.CTk):
     def _save_print_thread(self, send_to_printer):
         try:
             fmt_name = self.selected_format.get()
+            fmt = LABEL_FORMATS[fmt_name]
             printer = self.selected_printer.get() if send_to_printer else None
+            print_media = fmt.get("print_media") if send_to_printer else None
 
             doc = fitz.open(self.pdf_path)
             first_text = doc[0].get_text()
@@ -563,7 +572,7 @@ class EtiquetaSeparador(ctk.CTk):
 
                 if send_to_printer and printer:
                     try:
-                        result = print_image(filepath, printer)
+                        result = print_image(filepath, printer, print_media)
                         if result and result.returncode == 0:
                             printed += 1
                     except Exception:
@@ -591,12 +600,15 @@ class EtiquetaSeparador(ctk.CTk):
         self.print_all_button.configure(state="disabled")
         self.log_message(f"Imprimiendo {len(files)} etiquetas...")
 
+        fmt = LABEL_FORMATS[self.selected_format.get()]
+        media = fmt.get("print_media")
+
         def _print_thread():
             printed = 0
             for i, fname in enumerate(files):
                 filepath = os.path.join(self.last_output_dir, fname)
                 try:
-                    result = print_image(filepath, printer)
+                    result = print_image(filepath, printer, media)
                     if result and result.returncode == 0:
                         printed += 1
                         self.after(0, lambda f=fname: self.append_log(f"  OK: {f}"))
