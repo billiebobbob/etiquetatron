@@ -108,10 +108,9 @@ def print_image(filepath, printer_name=None, tape_mm=62):
 
 
 def _print_windows(filepath, printer_name, tape_mm=62):
-    """Imprime en Windows via PowerShell/.NET seleccionando rollo continuo.
-    Busca el papel '{tape_mm}mm' en los tamaños disponibles de la impresora.
-    Si no lo encuentra, usa tamaño custom basado en el DPI de la imagen.
-    La impresora corta automaticamente segun el largo de la imagen.
+    """Imprime en Windows via PowerShell/.NET con tamaño de papel exacto.
+    Calcula las dimensiones desde el DPI de la imagen para que la Brother QL-800
+    corte al largo correcto (152mm para envio, 62mm para producto).
     """
     fp = filepath.replace('\\', '\\\\')
     pn = (printer_name or "").replace("'", "''")
@@ -125,25 +124,12 @@ $bitmap = [System.Drawing.Image]::FromFile("{fp}")
 $pd = New-Object System.Drawing.Printing.PrintDocument
 $pd.PrinterSettings.PrinterName = "{pn}"
 
-# Buscar papel continuo "{tape_mm}mm" en la impresora
-$targetPaper = $null
-foreach ($ps in $pd.PrinterSettings.PaperSizes) {{
-    if ($ps.PaperName -eq "{tape_mm}mm") {{
-        $targetPaper = $ps
-        break
-    }}
-}}
-
-if ($targetPaper) {{
-    $pd.DefaultPageSettings.PaperSize = $targetPaper
-}} else {{
-    # Fallback: calcular tamaño custom desde la imagen
-    $wHundredths = [int]($bitmap.Width / $bitmap.HorizontalResolution * 100)
-    $hHundredths = [int]($bitmap.Height / $bitmap.VerticalResolution * 100)
-    $customSize = New-Object System.Drawing.Printing.PaperSize("Custom", $wHundredths, $hHundredths)
-    $pd.DefaultPageSettings.PaperSize = $customSize
-}}
-
+# Calcular tamaño exacto desde la imagen (en centesimas de pulgada)
+# Imagen de 62mm x 152mm a 300dpi → el papel debe ser exactamente ese tamaño
+$wHundredths = [int]($bitmap.Width / $bitmap.HorizontalResolution * 100)
+$hHundredths = [int]($bitmap.Height / $bitmap.VerticalResolution * 100)
+$customSize = New-Object System.Drawing.Printing.PaperSize("EtiquetaTron", $wHundredths, $hHundredths)
+$pd.DefaultPageSettings.PaperSize = $customSize
 $pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
 
 $pd.add_PrintPage({{
