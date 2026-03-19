@@ -1,0 +1,24 @@
+# Build
+dist/
+build/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+venv/
+.venv/
+
+# Output
+etiquetas/
+
+# macOS
+.DS_Store
+
+# Debug
+debug_*.png
+
+# Sensitive data
+*.pdf
