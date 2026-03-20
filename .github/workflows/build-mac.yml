@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build macOS App
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: macos-latest
 
     steps:
       - name: Checkout code
@@ -21,21 +21,20 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Build EXE
+      - name: Build App
         run: >
           pyinstaller --onefile --windowed --name "Papiro"
-          --icon "src/assets/icon.ico"
-          --add-data "src/assets/logo.png;src/assets"
-          --add-data "src/assets/icon.ico;src/assets"
-          --add-data "src/assets/icon.png;src/assets"
-          --add-data "src/templates;src/templates"
+          --add-data "src/assets/logo.png:src/assets"
+          --add-data "src/assets/icon.ico:src/assets"
+          --add-data "src/assets/icon.png:src/assets"
+          --add-data "src/templates:src/templates"
           --collect-all customtkinter
           --hidden-import PIL
           --hidden-import PIL._tkinter_finder
           main.py
 
-      - name: Upload EXE
+      - name: Upload App
         uses: actions/upload-artifact@v4
         with:
-          name: Papiro-Windows
-          path: dist/Papiro.exe
+          name: Papiro-macOS
+          path: dist/Papiro
